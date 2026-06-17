@@ -450,18 +450,22 @@ function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
 function clearToken() { localStorage.removeItem(TOKEN_KEY); }
 
 async function api(method, path, body) {
-  var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
-  var token = getToken();
-  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
-  if (body) opts.body = JSON.stringify(body);
-  var resp = await fetch(path, opts);
-  var data = await resp.json();
-  if (!data.ok && (resp.status === 401 || resp.status === 403)) {
-    if (resp.status === 401) { clearToken(); showAuth(); showToast('登录已过期，请重新登录', 'error'); }
-    else showToast(data.message, 'error');
+    var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+    var token = getToken();
+    if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+    if (body) opts.body = JSON.stringify(body);
+    try {
+      var resp = await fetch(path, opts);
+      var data = await resp.json();
+      if (!data.ok && (resp.status === 401 || resp.status === 403)) {
+        if (resp.status === 401) { clearToken(); showAuth(); showToast('登录已过期，请重新登录', 'error'); }
+        else showToast(data.message, 'error');
+      }
+      return data;
+    } catch (err) {
+      return { ok: false, message: '网络连接失败，请稍后重试' };
+    }
   }
-  return data;
-}
 
 // ============================
 // CATEGORIES
