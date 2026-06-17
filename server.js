@@ -42,7 +42,25 @@ function readJSON(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8'))
 function writeJSON(file, data) { fs.writeFileSync(file, JSON.stringify(data, null, 2)); }
 
 function hashPassword(pw) { return crypto.createHmac('sha256', 'orders-salt').update(pw).digest('hex'); }
-function genToken() { return crypto.randomUUID(); }
+
+// ===== Stateless JWT-like tokens (survive server restarts) =====
+const JWT_SECRET = 'orders-jwt-secret-' + (process.env.JWT_SECRET || crypto.randomBytes(16).toString('hex'));
+function makeToken(email) {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ email: email, iat: Date.now() })).toString('base64url');
+  const signature = crypto.createHmac('sha256', JWT_SECRET).update(header + '.' + payload).digest('base64url');
+  return header + '.' + payload + '.' + signature;
+}
+function verifyToken(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const sig = crypto.createHmac('sha256', JWT_SECRET).update(parts[0] + '.' + parts[1]).digest('base64url');
+    if (sig !== parts[2]) return null;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+    return payload.email;
+  } catch { return null; }
+}
 function genOrderId() { const d = new Date(); return 'ORD-' + d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0') + '-' + String(Math.floor(Math.random()*9000+1000)); }
 
 // ============================
@@ -51,9 +69,8 @@ function genOrderId() { const d = new Date(); return 'ORD-' + d.getFullYear() + 
 function auth(req, res, next) {
   const token = (req.headers.authorization || '').replace('Bearer ', '');
   if (!token) return res.status(401).json({ ok: false, message: '未登录' });
-  const tokens = readJSON(TOKENS_FILE);
-  const email = tokens[token];
-  if (!email) return res.status(401).json({ ok: false, message: '登录已过期' });
+  const email = verifyToken(token);
+  if (!email) return res.status(401).json({ ok: false, message: '登录已过期，请重新登录' });
   const users = readJSON(USERS_FILE);
   req.user = users[email];
   if (!req.user) return res.status(401).json({ ok: false, message: '用户不存在' });
@@ -98,7 +115,7 @@ app.post('/api/login', (req, res) => {
   if (!user || user.password !== hashPassword(password)) return res.json({ ok: false, message: '邮箱或密码错误' });
 
   const tokens = readJSON(TOKENS_FILE);
-  const token = genToken();
+  const token = makeToken(email);
   tokens[token] = email;
   writeJSON(TOKENS_FILE, tokens);
 
